@@ -15,9 +15,16 @@ from networkx.testing import assert_edges_equal
 from networkx.testing import assert_nodes_equal
 
 
+def almost_eq_fractions(x, y, perc=5.0):
+    if x == y:
+        return True
+    if abs(x - y) < perc/100:
+        return True
+    return False
+
+
 class TestInternetASTopology():
     def test_number_of_nodes(self):
-        # balanced_tree(r,h) is a tree with (r**(h+1)-1)/(r-1) edges
         g = internet_AS_graph(1000)
         assert_equal(len(g), 1000)
         assert_equal(len([n for n in g.nodes(data=True) if n[1]["type"]
@@ -28,3 +35,38 @@ class TestInternetASTopology():
                          == "CP"]), 49)
         assert_equal(len([n for n in g.nodes(data=True) if n[1]["type"]
                          == "C"]), 796)
+
+    def test_regions(self, numnodes=10000):
+        g = internet_AS_graph(numnodes)
+        regions = ["REG"+str(i) for i in range(5)]
+        r_labels = dict()
+        label_numbers = dict()
+        types = ["T", "M", "CP", "C"]
+        nodes_number = dict()
+        for t in types:
+            nodes_number[t] = len([n for n in g.nodes(data=True)
+                                   if n[1]["type"] == t])
+        for r in regions:
+            r_labels[r] = 0
+            for t in types:
+                label_numbers[t] = dict({(i, 0) for i in
+                                        range(1, len(regions)+1)})
+
+        for n in g.nodes(data=True):
+            labels = n[1]['regions'].split("_")
+            for l in r_labels:
+                r_labels[l] += 1
+            label_numbers[n[1]['type']][len(labels)] += 1
+
+        assert_true(almost_eq_fractions(label_numbers["M"][1] /
+                                        nodes_number["M"], 0.8))
+        assert_true(almost_eq_fractions(label_numbers["M"][2] /
+                                        nodes_number["M"], 0.2))
+        assert_true(almost_eq_fractions(label_numbers["CP"][1] /
+                                        nodes_number["CP"], 0.95))
+        assert_true(almost_eq_fractions(label_numbers["CP"][2] /
+                                        nodes_number["CP"], 0.05))
+        assert_true(almost_eq_fractions(label_numbers["C"][1] /
+                                        nodes_number["C"], 1))
+        assert_true(almost_eq_fractions(label_numbers["T"][5] /
+                                        nodes_number["T"], 1))
