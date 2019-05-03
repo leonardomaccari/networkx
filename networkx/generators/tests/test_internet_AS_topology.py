@@ -25,7 +25,7 @@ def almost_eq_fractions(x, y, perc=5.0):
 
 class TestInternetASTopology():
     def test_number_of_nodes(self):
-        g = internet_AS_graph(1000)
+        g = internet_as_graph(1000)
         assert_equal(len(g), 1000)
         assert_equal(len([n for n in g.nodes(data=True) if n[1]["type"]
                          == "T"]), 6)
@@ -37,7 +37,7 @@ class TestInternetASTopology():
                          == "C"]), 796)
 
     def test_regions(self, numnodes=10000):
-        g = internet_AS_graph(numnodes)
+        g = internet_as_graph(numnodes)
         regions = ["REG"+str(i) for i in range(5)]
         r_labels = dict()
         label_numbers = dict()
@@ -70,3 +70,10 @@ class TestInternetASTopology():
                                         nodes_number["C"], 1))
         assert_true(almost_eq_fractions(label_numbers["T"][5] /
                                         nodes_number["T"], 1))
+
+    def test_clique(self):
+        g = nx.internet_as_graph(1000)
+        t_nodes = [n[0] for n in g.nodes(data=True) if n[1]["type"] == "T"]
+        sub_g = g.subgraph(t_nodes)
+        assert_equal(nx.graph_clique_number(sub_g), len(t_nodes))
+

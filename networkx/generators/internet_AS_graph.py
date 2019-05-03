@@ -6,14 +6,14 @@ Internet AS graph.
 #    All rights reserved.
 #    BSD license.
 __author__ = """\n""".join(['Leonardo Maccari <maccari@disi.unitn.it>'])
-__all__ = ['internet_AS_graph']
+__all__ = ['internet_as_graph']
 
 import networkx as nx
 from networkx.utils import py_random_state
 
 
 @py_random_state(19)
-def internet_AS_graph(n, nt=6, nm=None, ncp=None, nc=None,
+def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
                       dm=None, dcp=None, dc=None, pm=None,
                       pcp_m=None, pcp_cp=None, tm=0.375,
                       tcp=0.375, tc=0.125, m_ratio=0.15,
@@ -120,9 +120,7 @@ def internet_AS_graph(n, nt=6, nm=None, ncp=None, nc=None,
         label = r_labels[i % len(r_labels)]
         g.add_node(i, type="C", regions=label)
 
-    #for node g.nodes(data=True):
-    #    r_set[node[1]['']]
-    #for l in t_labels:
-    #    r_set[l].add()
-
+    for i in range(nt):
+        for j in range(i, nt):
+            g.add_edge(i, j)
     return g
