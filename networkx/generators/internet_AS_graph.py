@@ -10,6 +10,40 @@ __all__ = ['internet_as_graph']
 
 import networkx as nx
 from networkx.utils import py_random_state
+from networkx.generators.random_graphs import _random_subset
+
+
+@py_random_state(5)
+def pref_attach(g, source, num_targets, node_lists, region_list, seed,
+                label="transit"):
+    """ Attach a new node to the network with preferential attachment
+
+    g: nx Graph
+    source: node
+    num_targets: int
+        How many link to add to the new node
+    node_lists:
+        dictionary or lists of valid nodes, keyed by region
+    region_list:
+        list of regions that we can attach to"""
+
+    if not num_targets:
+        return
+    nodes = set()
+    # take all nodes in the valid regions, without copies
+    for region in region_list:
+        nodes.update(node_lists[region])
+
+    # create an array with nodes repeated by their degree + 1
+    nodes_w_copies = []
+    for n in nodes:
+        deg = len(list(filter(lambda x: x[2]['type'] == label,
+                  g.edges(n, data=True))))
+        nodes_w_copies.extend([n]*(1 + len(g.edges(n))))
+
+    # choose randomly on the set of nodes with repetition
+    targets = _random_subset(nodes_w_copies, num_targets, seed)
+    g.add_edges_from(zip([source]*num_targets, targets), type=label)
 
 
 @py_random_state(19)
@@ -101,26 +135,110 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
     if not nc:
         nc = n - nt - ncp - nm
     r_labels = ["REG"+str(i) for i in range(regions)]
+    node_lists = dict()
+    for k in ["T", "M", "CP", "C"]:
+        node_lists[k] = dict([(l, []) for l in r_labels])
+
     r_set = dict()
     for l in r_labels:
         r_set[l] = set()
     all_regions = "_".join(sorted(r_labels))
     g.add_nodes_from(range(nt), type="T", regions="_".join(r_labels))
-    for i in range(nt, nm + nt):
-        label = r_labels[i % len(r_labels)]
-        if seed.random() < m_tworeg:  # 20% of M nodes are in 2 regions
-            label += "_" + r_labels[seed.randint(0, len(r_labels) - 1)]
-        g.add_node(i, type="M", regions=label)
-    for i in range(nt + nm, nt + nm + ncp):
-        label = r_labels[i % len(r_labels)]
-        if seed.random() < cp_tworeg:  # 5% of CP nodes are in 2 regions
-            label += "_" + r_labels[seed.randint(0, len(r_labels) - 1)]
-        g.add_node(i, type="CP", regions=label)
-    for i in range(nt + nm + ncp, nt + nm + ncp + nc):
-        label = r_labels[i % len(r_labels)]
-        g.add_node(i, type="C", regions=label)
+    node_lists["T"] = dict((l, range(nt)) for l in r_set)
 
+    for i in range(nt, nm + nt):
+        first_region = i % len(r_labels)
+        label = r_labels[first_region]
+        node_lists["M"][label].append(i)
+        if seed.random() < m_tworeg:  # 20% of M nodes are in 2 regions
+            second_label = seed.choice(
+                r_labels[:first_region] + r_labels[first_region+1:])
+            label += "_" + second_label
+            node_lists["M"][second_label].append(i)
+        g.add_node(i, type="M", regions=label)
+
+    for i in range(nt + nm, nt + nm + ncp):
+        first_region = i % len(r_labels)
+        label = r_labels[first_region]
+        node_lists["CP"][label].append(i)
+        if seed.random() < cp_tworeg:  # 5% of CP nodes are in 2 regions
+            second_label = seed.choice(
+                r_labels[:first_region] + r_labels[first_region+1:])
+            label += "_" + second_label
+            node_lists["CP"][second_label].append(i)
+        g.add_node(i, type="CP", regions=label)
+
+    for i in range(nt + nm + ncp, nt + nm + ncp + nc):
+        first_region = i % len(r_labels)
+        label = r_labels[first_region]
+        g.add_node(i, type="C", regions=label)
+        node_lists["C"][label].append(i)
+
+    # a clique of T nodes
     for i in range(nt):
         for j in range(i, nt):
-            g.add_edge(i, j)
+            g.add_edge(i, j, type="peer")
+
+    # Add transit links
+
+    d_m = 2 + n*2.5/10000
+    t_m = 0.375
+    d_cp = 2 + n*1.5/10000
+    t_cp = 0.375
+    d_c = 1 + n*5.0/100000
+    t_c = 0.125
+
+    for i in range(nt + 1, n):
+        regions = g.nodes(data=True)[i]["regions"].split("_")
+        node_type = g.nodes(data=True)[i]["type"]
+        if node_type == "M":
+            deg = max(1, round(seed.random()*d_m*2))
+            deg_t = round(deg*t_m)
+        elif node_type == "CP":
+            deg = max(1, round(seed.random()*d_cp*2))
+            deg_t = round(deg*t_cp)
+        else:
+            deg = max(1, round(seed.random()*d_c*2))
+            deg_t = round(deg*t_c)
+        deg_m = deg - deg_t
+        pref_attach(g, i, deg_t, node_lists["T"], regions, seed)
+        pref_attach(g, i, deg_m, node_lists["M"], regions, seed)
+
+        # two unclear things from the paper:
+        # -  we assume CP nodes can have transit with both T and M
+        # -  we assume the degree is uniformely distributed for C
+        #    as in the M and CP nodes
+
+    # add peering links
+    p_m = 1 + n*2.0/10000
+    p_cp_m = 0.2 + n*2.0/10000
+    p_cp_cp = 0.05 + n*5.0/100000
+
+    for i in range(nt + 1, nt + nm + ncp + 1):
+        node_type = g.nodes(data=True)[i]["type"]
+        regions = g.nodes(data=True)[i]["regions"].split("_")
+        if node_type == "M":
+            deg_m = max(0, round(seed.random()*p_m*2))
+            if deg_m:
+                pref_attach(g, i, deg, node_lists["M"], regions, seed,
+                            label="peer")
+        elif node_type == "CP":
+            deg_m = max(0, round(seed.random()*p_cp_m*2))
+            deg_cp = max(0, round(seed.random()*p_cp_cp*2))
+            # CP nodes are attached with a uniform probability
+            potential_targets_m = []
+            potential_targets_cp = []
+            if deg_m:
+                for r in regions:
+                    potential_targets_m += node_lists['M'][r]
+            if deg_cp:
+                for r in regions:
+                    potential_targets_cp += node_lists['CP'][r]
+
+            targets = _random_subset(potential_targets_m, deg_m, seed)
+            g.add_edges_from(zip([i]*len(targets), targets), type="peer")
+            targets = _random_subset(potential_targets_cp, deg_cp, seed)
+            g.add_edges_from(zip([i]*len(targets), targets), type="peer")
+    # TODO how do we enforce the condition espressed at the last lines of III.B ?
+
     return g
