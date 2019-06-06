@@ -15,7 +15,7 @@ from networkx.generators.random_graphs import _random_subset
 
 @py_random_state(5)
 def pref_attach(g, source, num_targets, node_lists, region_list, seed,
-                label="transit"):
+                label="transit", pa_with_edge_type=True):
     """ Attach a new node to the network with preferential attachment
 
     g: nx Graph
@@ -25,7 +25,11 @@ def pref_attach(g, source, num_targets, node_lists, region_list, seed,
     node_lists:
         dictionary or lists of valid nodes, keyed by region
     region_list:
-        list of regions that we can attach to"""
+        list of regions that we can attach to
+    label:
+        add edges with this label
+    ba_with_edge_type:
+        when computing the degree, restrict to the edges of type "label" """
 
     if not num_targets:
         return
@@ -34,15 +38,24 @@ def pref_attach(g, source, num_targets, node_lists, region_list, seed,
     for region in region_list:
         nodes.update(node_lists[region])
 
-    # create an array with nodes repeated by their degree + 1
+    # create an array with nodes repeated by their degree
     nodes_w_copies = []
+    num_candidates = 0
     for n in nodes:
-        deg = len(list(filter(lambda x: x[2]['type'] == label,
-                  g.edges(n, data=True))))
-        nodes_w_copies.extend([n]*(1 + len(g.edges(n))))
-
+        if not pa_with_edge_type:
+            deg = g.in_degree(n)
+        else:
+            deg = len(list(filter(lambda x: x[2]['type'] == label,
+                      g.in_edges(n, data=True))))
+        if deg:
+            nodes_w_copies.extend([n]*deg)
+            num_candidates += 1
     # choose randomly on the set of nodes with repetition
-    targets = _random_subset(nodes_w_copies, num_targets, seed)
+    if not nodes_w_copies:
+        return
+    targets = _random_subset(nodes_w_copies, min(num_targets,
+                                                 num_candidates),
+                             seed)
     g.add_edges_from(zip([source]*num_targets, targets), type=label)
 
 
@@ -127,7 +140,7 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
     Constantine Dovrolis, JSAC 2010.
     """
 
-    g = nx.Graph()
+    g = nx.DiGraph()
     if not nm:
         nm = int(m_ratio*(n-nt))
     if not ncp:
@@ -144,7 +157,7 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
         r_set[l] = set()
     all_regions = "_".join(sorted(r_labels))
     g.add_nodes_from(range(nt), type="T", regions="_".join(r_labels))
-    node_lists["T"] = dict((l, range(nt)) for l in r_set)
+    node_lists["T"] = dict((l, [i for i in range(nt)]) for l in r_set)
 
     for i in range(nt, nm + nt):
         first_region = i % len(r_labels)
@@ -176,8 +189,9 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
 
     # a clique of T nodes
     for i in range(nt):
-        for j in range(i, nt):
+        for j in range(i + 1, nt):
             g.add_edge(i, j, type="peer")
+            g.add_edge(j, i, type="peer")
 
     # Add transit links
 
@@ -188,33 +202,52 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
     d_c = 1 + n*5.0/100000
     t_c = 0.125
 
-    for i in range(nt + 1, n):
+    for i in range(nt, n):
         regions = g.nodes(data=True)[i]["regions"].split("_")
         node_type = g.nodes(data=True)[i]["type"]
         if node_type == "M":
             deg = max(1, round(seed.random()*d_m*2))
-            deg_t = round(deg*t_m)
+            prop_t = round(deg*t_m)
         elif node_type == "CP":
             deg = max(1, round(seed.random()*d_cp*2))
-            deg_t = round(deg*t_cp)
+            prop_t = round(deg*t_cp)
         else:
             deg = max(1, round(seed.random()*d_c*2))
-            deg_t = round(deg*t_c)
-        deg_m = deg - deg_t
-        pref_attach(g, i, deg_t, node_lists["T"], regions, seed)
+            prop_t = round(deg*t_c)
+        deg_t = 0
+        deg_m = 0
+        for j in range(deg):
+            if seed.random() < prop_t:
+                deg_t += 1
+            else:
+                deg_m += 1
         pref_attach(g, i, deg_m, node_lists["M"], regions, seed)
+        # early M nodes do not have other M nodes to attach to, we compensate
+        # with T nodes
+        if g.out_degree(i) < deg_m:
+            deg_t += deg_m - g.out_degree(i)
+        pref_attach(g, i, deg_t, node_lists["T"], regions, seed)
+        if g.out_degree(i) < deg:
+            # The paper specifies that preferential attachment for transit
+            # links should be computed only considering the transit links.
+            # At the beginning of the preferential attachment, T nodes have
+            # only peering links, so their degree on transit links is zero
+            # and they don't receive links. We allow to ignore the type of
+            # links when deg_t is not matched.
+            pref_attach(g, i, deg - g.out_degree(i), node_lists["T"], regions,
+                        seed, pa_with_edge_type=False)
 
         # two unclear things from the paper:
         # -  we assume CP nodes can have transit with both T and M
         # -  we assume the degree is uniformely distributed for C
         #    as in the M and CP nodes
 
-    # add peering links
+    # we now add peering links
     p_m = 1 + n*2.0/10000
     p_cp_m = 0.2 + n*2.0/10000
     p_cp_cp = 0.05 + n*5.0/100000
 
-    for i in range(nt + 1, nt + nm + ncp + 1):
+    for i in range(nt, nt + nm + ncp):
         node_type = g.nodes(data=True)[i]["type"]
         regions = g.nodes(data=True)[i]["regions"].split("_")
         if node_type == "M":
