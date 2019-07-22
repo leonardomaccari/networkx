@@ -17,6 +17,7 @@ import networkx as nx
 from networkx import *
 from networkx.testing import assert_edges_equal
 from networkx.testing import assert_nodes_equal
+from collections import defaultdict
 
 
 # --no-skip is bugged. Does not work properly withouth this patch
@@ -42,9 +43,13 @@ class TestInternetASTopology():
     @classmethod
     def setup_class(cls):
         cls.small_g = internet_as_graph(1000)
+        cls.peerless_g = nx.DiGraph()
+        for e in cls.small_g.edges(data=True):
+            if e[2]['type'] != "peer":
+                cls.peerless_g.add_edge(e[0], e[1])
 
     def test_number_of_nodes(self):
-        raise SkipTest()
+        """ test the number of nodes """
         assert_equal(len(self.small_g), 1000)
         assert_equal(len([n for n in self.small_g.nodes(data=True)
                           if n[1]["type"] == "T"]), 6)
@@ -56,6 +61,7 @@ class TestInternetASTopology():
                           if n[1]["type"] == "C"]), 796)
 
     def test_clique(self):
+        """ test T nodes from a clique """
         t_nodes = set([n[0] for n in self.small_g.nodes(data=True)
                       if n[1]["type"] == "T"])
         sub_g = self.small_g.subgraph(t_nodes)
@@ -65,6 +71,7 @@ class TestInternetASTopology():
             assert_equal(neighs, t_nodes - set([n]))
 
     def test_edges_T(self):
+        """ test correct T relationships """
         for n in self.small_g.nodes(data=True):
             if n[1]["type"] == "T":
                 for e in self.small_g.out_edges(n[0], data=True):
@@ -79,6 +86,7 @@ class TestInternetASTopology():
                         assert_true(self.small_g.nodes[e[0]]['type'] != "T")
 
     def test_edges_M(self):
+        """ test correct M relationships """
         for n in self.small_g.nodes(data=True):
             if n[1]["type"] == "M":
                 for e in self.small_g.out_edges(n[0], data=True):
@@ -100,6 +108,7 @@ class TestInternetASTopology():
                                   ['CP', 'M'])
 
     def test_edges_CP(self):
+        """ test correct CP relationships """
         for n in self.small_g.nodes(data=True):
             if n[1]["type"] == 'CP':
                 # CP nodes do not peer with T and C, and sell no transit
@@ -114,15 +123,31 @@ class TestInternetASTopology():
                         assert_in(self.small_g.nodes[e[1]]['type'], ['T', 'M'])
 
     def test_edges(self):
-        # all edges are labeled
+        """ test all edges are labeled """
         for e in self.small_g.edges(data=True):
             assert_in(e[2]['type'], ['transit', 'peer'])
 
     def test_connectedness(self):
+        """ test if graph is connected """
         counter = 0
         assert_true(nx.is_weakly_connected(self.small_g))
         g = self.small_g.to_undirected()
         assert_true(nx.is_connected(g))
+
+    def test_loopfree(self):
+        """ test that without peering links the graph is loop free """
+        assert_true(nx.is_directed_acyclic_graph(self.peerless_g))
+
+    def test_consistentcy(self):
+        """ test that no node peers with someone in its customer tree """
+        peering_relations = defaultdict(set)
+        for e in self.small_g.edges(data=True):
+            if e[2]["type"] == "peer":
+                peering_relations[e[0]].add(e[1])
+                peering_relations[e[1]].add(e[0])
+        for n in peering_relations:
+            sn = internet_AS_graph.find_subtree_nodes(self.peerless_g, n)
+            assert_true(sn.isdisjoint(peering_relations[n]))
 
 
 class TestInternetASTopologyStats():
@@ -136,6 +161,7 @@ class TestInternetASTopologyStats():
         cls.medium_g = internet_as_graph(10000)
 
     def test_regions(self):
+        """ test region distribution is close to target """
         if not no_skip:
             raise SkipTest(skip_message)
         regions = ["REG"+str(i) for i in range(5)]

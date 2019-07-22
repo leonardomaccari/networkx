@@ -14,16 +14,20 @@ from networkx.generators.random_graphs import _random_subset
 
 
 @py_random_state(5)
-def pref_attach(g, source, num_targets, node_lists, region_list, seed,
-                label="transit", pa_with_edge_type=True):
+def pref_attach(g, source, num_targets, node_region_lists, region_list, seed,
+                peerless_g, label="transit", pa_with_edge_type=True):
     """ Attach a new node to the network with preferential attachment
 
     g: nx Graph
     source: node
     num_targets: int
         How many link to add to the new node
-    node_lists:
+    node_region_lists:
         dictionary or lists of valid nodes, keyed by region
+    seed:
+        random seed
+    peerless_g:
+        graph without peer links
     region_list:
         list of regions that we can attach to
     label:
@@ -36,17 +40,27 @@ def pref_attach(g, source, num_targets, node_lists, region_list, seed,
     nodes = set()
     # take all nodes in the valid regions, without copies
     for region in region_list:
-        nodes.update(node_lists[region])
+        nodes.update(node_region_lists[region])
 
     # create an array with nodes repeated by their degree
     nodes_w_copies = []
     num_candidates = 0
+
+    subtree_nodes = find_subtree_nodes(peerless_g, source)
     for n in nodes:
+        if n in subtree_nodes:
+            continue
         if not pa_with_edge_type:
             deg = g.in_degree(n)
         else:
             deg = len(list(filter(lambda x: x[2]['type'] == label,
                       g.in_edges(n, data=True))))
+        # at the initial stage, T nodes have no customers, and thus,
+        # the chances they are chosen in pref. attachment are 0
+        # we initialize them with probability larger than zero so
+        # they start being populated with customers
+        if not deg and g.nodes[n]['type'] == 'T':
+            deg = 1
         if deg:
             nodes_w_copies.extend([n]*deg)
             num_candidates += 1
@@ -57,6 +71,17 @@ def pref_attach(g, source, num_targets, node_lists, region_list, seed,
                                                  num_candidates),
                              seed)
     g.add_edges_from(zip([source]*num_targets, targets), type=label)
+    if label != "peer":
+        peerless_g.add_edges_from(zip([source]*num_targets, targets),
+                                  type=label)
+
+
+def find_subtree_nodes(g, target):
+    """ This check is needed because we have to avoid loops. Node x can not
+    be a customer of (or peer with) some other node that is in its customer
+    tree. It is very expensive, though, so something smarter may be done """
+    subtree_nodes = [n for n in g.nodes() if nx.has_path(g, n, target)]
+    return set(subtree_nodes)
 
 
 @py_random_state(19)
@@ -187,6 +212,7 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
         g.add_node(i, type="C", regions=label)
         node_lists["C"][label].append(i)
 
+    peerless_g = g.copy()
     # a clique of T nodes
     for i in range(nt):
         for j in range(i + 1, nt):
@@ -221,21 +247,12 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
                 deg_t += 1
             else:
                 deg_m += 1
-        pref_attach(g, i, deg_m, node_lists["M"], regions, seed)
+        pref_attach(g, i, deg_m, node_lists["M"], regions, seed, peerless_g)
         # early M nodes do not have other M nodes to attach to, we compensate
         # with T nodes
         if g.out_degree(i) < deg_m:
             deg_t += deg_m - g.out_degree(i)
-        pref_attach(g, i, deg_t, node_lists["T"], regions, seed)
-        if g.out_degree(i) < deg:
-            # The paper specifies that preferential attachment for transit
-            # links should be computed only considering the transit links.
-            # At the beginning of the preferential attachment, T nodes have
-            # only peering links, so their degree on transit links is zero
-            # and they don't receive links. We allow to ignore the type of
-            # links when deg_t is not matched.
-            pref_attach(g, i, deg - g.out_degree(i), node_lists["T"], regions,
-                        seed, pa_with_edge_type=False)
+        pref_attach(g, i, deg_t, node_lists["T"], regions, seed, peerless_g)
 
         # two unclear things from the paper:
         # -  we assume CP nodes can have transit with both T and M
@@ -254,7 +271,7 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
             deg_m = max(0, round(seed.random()*p_m*2))
             if deg_m:
                 pref_attach(g, i, deg, node_lists["M"], regions, seed,
-                            label="peer")
+                            peerless_g, label="peer")
         elif node_type == "CP":
             deg_m = max(0, round(seed.random()*p_cp_m*2))
             deg_cp = max(0, round(seed.random()*p_cp_cp*2))
@@ -267,11 +284,25 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
             if deg_cp:
                 for r in regions:
                     potential_targets_cp += node_lists['CP'][r]
+            subtree_nodes = find_subtree_nodes(peerless_g, i)
+            ss = len(subtree_nodes)
+            for n in potential_targets_cp:
+                if n in subtree_nodes:
+                    potential_targets_cp.remove(n)
+                    ss -= 1
+                    if not ss:
+                        break
+            ss = len(subtree_nodes)
+            for n in potential_targets_m:
+                if n in subtree_nodes:
+                    potential_targets_m.remove(n)
+                    ss -= 1
+                    if not ss:
+                        break
 
             targets = _random_subset(potential_targets_m, deg_m, seed)
             g.add_edges_from(zip([i]*len(targets), targets), type="peer")
             targets = _random_subset(potential_targets_cp, deg_cp, seed)
             g.add_edges_from(zip([i]*len(targets), targets), type="peer")
-    # TODO how do we enforce the condition espressed at the last lines of III.B ?
 
     return g
