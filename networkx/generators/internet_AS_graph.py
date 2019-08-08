@@ -15,7 +15,7 @@ from networkx.generators.random_graphs import _random_subset
 
 @py_random_state(5)
 def pref_attach(g, source, num_targets, node_region_lists, region_list, seed,
-                peerless_g, label="transit", pa_with_edge_type=True):
+                peerless_g, label="transit"):
     """ Attach a new node to the network with preferential attachment
 
     g: nx Graph
@@ -31,9 +31,7 @@ def pref_attach(g, source, num_targets, node_region_lists, region_list, seed,
     region_list:
         list of regions that we can attach to
     label:
-        add edges with this label
-    ba_with_edge_type:
-        when computing the degree, restrict to the edges of type "label" """
+        add edges with this label"""
 
     if not num_targets:
         return
@@ -50,11 +48,9 @@ def pref_attach(g, source, num_targets, node_region_lists, region_list, seed,
     for n in nodes:
         if n in subtree_nodes:
             continue
-        if not pa_with_edge_type:
-            deg = g.in_degree(n)
         else:
             deg = len(list(filter(lambda x: x[2]['type'] == label,
-                      g.in_edges(n, data=True))))
+                      g.edges(n, data=True))))
         # at the initial stage, T nodes have no customers, and thus,
         # the chances they are chosen in pref. attachment are 0
         # we initialize them with probability larger than zero so
