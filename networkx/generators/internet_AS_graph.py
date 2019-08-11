@@ -213,7 +213,6 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
     for i in range(nt):
         for j in range(i + 1, nt):
             g.add_edge(i, j, type="peer")
-            g.add_edge(j, i, type="peer")
 
     # Add transit links
 

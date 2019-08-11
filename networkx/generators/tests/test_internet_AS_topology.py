@@ -61,13 +61,13 @@ class TestInternetASTopology():
                           if n[1]["type"] == "C"]), 796)
 
     def test_clique(self):
-        """ test T nodes from a clique """
+        """ test T nodes form a clique """
         t_nodes = set([n[0] for n in self.small_g.nodes(data=True)
                       if n[1]["type"] == "T"])
-        sub_g = self.small_g.subgraph(t_nodes)
+        sub_g = nx.Graph(self.small_g.subgraph(t_nodes))
         # all T nodes must peer with each other
         for n in sub_g:
-            neighs = set([e[1] for e in sub_g.out_edges(n)])
+            neighs = set([e[1] for e in sub_g.edges(n)])
             assert_equal(neighs, t_nodes - set([n]))
 
     def test_edges_T(self):
@@ -148,6 +148,15 @@ class TestInternetASTopology():
         for n in peering_relations:
             sn = internet_AS_graph.find_subtree_nodes(self.peerless_g, n)
             assert_true(sn.isdisjoint(peering_relations[n]))
+
+    def test_single_peer_links(self):
+        """ test that peering links are not duplicated """
+        for n in self.small_g.nodes():
+            in_e = filter(lambda x: x[2]['type'] == 'peer',
+                          self.small_g.in_edges(n, data=True))
+            for e in self.small_g.out_edges(n, data=True):
+                if e[2]['type'] == 'peer':
+                    assert_false((e[1], e[0]) in in_e)
 
 
 class TestInternetASTopologyStats():
