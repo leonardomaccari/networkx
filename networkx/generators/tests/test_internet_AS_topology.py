@@ -89,11 +89,13 @@ class TestInternetASTopology():
         """ test correct M relationships """
         for n in self.small_g.nodes(data=True):
             if n[1]["type"] == "M":
+                provider_number = 0
                 for e in self.small_g.out_edges(n[0], data=True):
                     # M nodes do not buy transit from C or CP
                     if e[2]['type'] == "transit":
                         assert_true(self.small_g.nodes[e[1]]['type'] != "CP")
                         assert_true(self.small_g.nodes[e[1]]['type'] != "C")
+                        provider_number += 1
                     # M nodes do not peer with T and C
                     if e[2]['type'] == "peer":
                         assert_true(self.small_g.nodes[e[1]]['type'] != "T")
@@ -106,11 +108,14 @@ class TestInternetASTopology():
                     if e[2]['type'] == "peer":
                         assert_in(self.small_g.nodes[e[1]]['type'],
                                   ['CP', 'M'])
+                # every M node should have at least one provider
+                assert_true(provider_number)
 
     def test_edges_CP(self):
         """ test correct CP relationships """
         for n in self.small_g.nodes(data=True):
             if n[1]["type"] == 'CP':
+                provider_number = 0
                 # CP nodes do not peer with T and C, and sell no transit
                 for e in self.small_g.in_edges(n[0], data=True):
                     assert_true(e[2]['type'], 'peer')
@@ -121,7 +126,24 @@ class TestInternetASTopology():
                                   ['CP', 'M'])
                     if e[2]['type'] == "transit":
                         assert_in(self.small_g.nodes[e[1]]['type'], ['T', 'M'])
+                        provider_number += 1
+                # every CP node should have at least one provider
+                assert_true(provider_number)
 
+    def test_edges_C(self):
+        """ test correct C relationships """
+        for n in self.small_g.nodes(data=True):
+            if n[1]["type"] == 'C':
+                provider_number = 0
+                for e in self.small_g.out_edges(n[0], data=True):
+                        # C nodes buy transit from T or M only
+                        if e[2]['type'] == "transit":
+                            assert_true(self.small_g.nodes[e[1]]['type'] != "CP")
+                            assert_true(self.small_g.nodes[e[1]]['type'] != "C")
+                            provider_number += 1
+                # every C node should have at least one provider
+                assert_true(provider_number)
+     
     def test_edges(self):
         """ test all edges are labeled """
         for e in self.small_g.edges(data=True):
@@ -158,6 +180,19 @@ class TestInternetASTopology():
                 if e[2]['type'] == 'peer':
                     assert_false((e[1], e[0]) in in_e)
 
+    def test_nodes_do_peer(self):
+        t_nodes = set([n[0] for n in self.small_g.nodes(data=True)
+                      if n[1]["type"] == "T"])
+        peering_nodes = 0
+        for e in self.small_g.edges(data=True):
+            if e[2]['type'] != 'peer':
+                continue
+            if e[0] not in t_nodes and e[1] not in t_nodes:
+                peering_nodes += 1
+        # check that at least 5% of nodes do peer
+        assert_true(peering_nodes/len(self.small_g) > 0.05)
+
+
 
 class TestInternetASTopologyStats():
     """ use nosetests --no-skip test_internet_AS_topology.py
@@ -167,7 +202,7 @@ class TestInternetASTopologyStats():
     def setup_class(cls):
         if not no_skip:
             raise SkipTest(skip_message)
-        cls.medium_g = internet_as_graph(10000)
+        cls.medium_g = internet_as_graph(5000)
 
     def test_regions(self):
         """ test region distribution is close to target """
@@ -207,6 +242,49 @@ class TestInternetASTopologyStats():
                                         nodes_number["C"], 1))
         assert_true(almost_eq_fractions(label_numbers["T"][5] /
                                         nodes_number["T"], 1))
+
+    def test_edges_fraction(self):
+        """ test the proportion of transit links to T nodes """
+        t_nodes = set([n[0] for n in self.medium_g.nodes(data=True)
+                      if n[1]["type"] == "T"])
+        m_nodes = set([n[0] for n in self.medium_g.nodes(data=True)
+                      if n[1]["type"] == "M"])
+        cp_nodes = set([n[0] for n in self.medium_g.nodes(data=True)
+                       if n[1]["type"] == "CP"])
+        c_nodes = set([n[0] for n in self.medium_g.nodes(data=True)
+                      if n[1]["type"] == "C"])
+        m_t_edges_count = 0
+        cp_t_edges_count = 0
+        c_t_edges_count = 0
+        other_m_edges_count = 0
+        other_cp_edges_count = 0
+        other_c_edges_count = 0
+        for n in self.medium_g.nodes():
+            for e in self.medium_g.out_edges(n, data=True):
+                if e[2]['type'] == 'transit':
+                    if n in m_nodes:
+                        if e[1] in t_nodes:
+                            m_t_edges_count += 1
+                        else:
+                            other_m_edges_count += 1
+                    elif n in cp_nodes:
+                        if e[1] in t_nodes:
+                            cp_t_edges_count += 1
+                        else:
+                            other_cp_edges_count += 1
+                    elif n in c_nodes:
+                        if e[1] in t_nodes:
+                            c_t_edges_count += 1
+                        else:
+                            other_c_edges_count += 1
+        m_t_frac = m_t_edges_count/(m_t_edges_count + other_m_edges_count)
+        cp_t_frac = cp_t_edges_count/(cp_t_edges_count + other_cp_edges_count)
+        c_t_frac = c_t_edges_count/(c_t_edges_count + other_c_edges_count)
+        print(m_t_frac, cp_t_frac, c_t_frac)
+        assert_true(almost_eq_fractions(m_t_frac, 0.375))
+        assert_true(almost_eq_fractions(cp_t_frac, 0.375))
+        assert_true(almost_eq_fractions(c_t_frac, 0.125))
+
 
     # TODO add test to reasonably test the Power-law distribution of the degree
     def test_statistics(self):

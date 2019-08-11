@@ -228,13 +228,13 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
         node_type = g.nodes(data=True)[i]["type"]
         if node_type == "M":
             deg = max(1, round(seed.random()*d_m*2))
-            prop_t = round(deg*t_m)
+            prop_t = t_m
         elif node_type == "CP":
             deg = max(1, round(seed.random()*d_cp*2))
-            prop_t = round(deg*t_cp)
+            prop_t = t_cp
         else:
             deg = max(1, round(seed.random()*d_c*2))
-            prop_t = round(deg*t_c)
+            prop_t = t_c
         deg_t = 0
         deg_m = 0
         for j in range(deg):
