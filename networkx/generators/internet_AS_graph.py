@@ -50,16 +50,17 @@ def pref_attach(g, source, num_targets, node_region_lists, region_list, seed,
     for n in nodes:
         if n in subtree_nodes or n in nx.all_neighbors(g, source):
             continue
+        if label == 'peer' and nx.has_path(peerless_g, source, n):
+            continue
+        if any_type:
+            # when M nodes start to peer, their peering degree is 0.
+            # the original algorithm does not explain how to initialize
+            # the BA algorithm in this case. Most sane thing is, for
+            # the first M round, do consider the degree extended to
+            # transit links
+            deg = g.degree(n)
         else:
-            if any_type:
-                # when M nodes start to peer, their peering degree is 0.
-                # the original algorithm does not explain how to initialize
-                # the BA algorithm in this case. Most sane thing is, for
-                # the first M round, do consider the degree extended to
-                # transit links
-                deg = g.degree(n)
-            else:
-                deg = len(list(filter(lambda x: x[2]['type'] == label,
+            deg = len(list(filter(lambda x: x[2]['type'] == label,
                                       g.edges(n, data=True))))
 
         # at the initial stage, T nodes have no customers, and thus,
@@ -71,9 +72,9 @@ def pref_attach(g, source, num_targets, node_region_lists, region_list, seed,
         if deg:
             nodes_w_copies.extend([n]*deg)
             num_candidates += 1
-    # choose randomly on the set of nodes with repetition
     if not nodes_w_copies:
         return
+    # choose randomly on the set of nodes without repetition
     targets = _random_subset(nodes_w_copies, min(num_targets,
                                                  num_candidates),
                              seed)
@@ -292,24 +293,20 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
             if deg_cp:
                 for r in regions:
                     potential_targets_cp += node_lists['CP'][r]
-            subtree_nodes = find_subtree_nodes(peerless_g, i)
-            ss = len(subtree_nodes)
-            for n in potential_targets_cp:
-                if n in subtree_nodes:
-                    potential_targets_cp.remove(n)
-                    ss -= 1
-                    if not ss:
-                        break
-            ss = len(subtree_nodes)
+            remove_nodes = []
             for n in potential_targets_m:
-                if n in subtree_nodes:
-                    potential_targets_m.remove(n)
-                    ss -= 1
-                    if not ss:
-                        break
+                # n can not peer with i if i is in its customer tree
+                if nx.has_path(peerless_g, i, n):
+                    remove_nodes.append(n)
+            potential_targets_m = [n for n in potential_targets_m
+                                   if n not in remove_nodes]
 
-            targets = _random_subset(potential_targets_m, deg_m, seed)
-            g.add_edges_from(zip([i]*len(targets), targets), type="peer")
-            targets = _random_subset(potential_targets_cp, deg_cp, seed)
-            g.add_edges_from(zip([i]*len(targets), targets), type="peer")
+            if potential_targets_cp:
+                deg_cp = min(deg_cp, len(potential_targets_cp))
+                targets = _random_subset(potential_targets_cp, deg_cp, seed)
+                g.add_edges_from(zip([i]*len(targets), targets), type="peer")
+            if potential_targets_m:
+                deg_m = min(deg_m, len(potential_targets_m))
+                targets = _random_subset(potential_targets_m, deg_m, seed)
+                g.add_edges_from(zip([i]*len(targets), targets), type="peer")
     return g
