@@ -15,7 +15,7 @@ from networkx.generators.random_graphs import _random_subset
 
 @py_random_state(5)
 def pref_attach(g, source, num_targets, node_region_lists, region_list, seed,
-                peerless_g, label="transit"):
+                peerless_g, label="transit", any_type=False):
     """ Attach a new node to the network with preferential attachment
 
     g: nx Graph
@@ -31,7 +31,9 @@ def pref_attach(g, source, num_targets, node_region_lists, region_list, seed,
     region_list:
         list of regions that we can attach to
     label:
-        add edges with this label"""
+        add edges with this label
+    any_type:
+        compute node degree with edges of any type, not only 'label'"""
 
     if not num_targets:
         return
@@ -46,11 +48,20 @@ def pref_attach(g, source, num_targets, node_region_lists, region_list, seed,
 
     subtree_nodes = find_subtree_nodes(peerless_g, source)
     for n in nodes:
-        if n in subtree_nodes:
+        if n in subtree_nodes or n in nx.all_neighbors(g, source):
             continue
         else:
-            deg = len(list(filter(lambda x: x[2]['type'] == label,
-                      g.edges(n, data=True))))
+            if any_type:
+                # when M nodes start to peer, their peering degree is 0.
+                # the original algorithm does not explain how to initialize
+                # the BA algorithm in this case. Most sane thing is, for
+                # the first M round, do consider the degree extended to
+                # transit links
+                deg = g.degree(n)
+            else:
+                deg = len(list(filter(lambda x: x[2]['type'] == label,
+                                      g.edges(n, data=True))))
+
         # at the initial stage, T nodes have no customers, and thus,
         # the chances they are chosen in pref. attachment are 0
         # we initialize them with probability larger than zero so
@@ -258,15 +269,17 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
     p_m = 1 + n*2.0/10000
     p_cp_m = 0.2 + n*2.0/10000
     p_cp_cp = 0.05 + n*5.0/100000
-
+    first_round = True
     for i in range(nt, nt + nm + ncp):
         node_type = g.nodes(data=True)[i]["type"]
         regions = g.nodes(data=True)[i]["regions"].split("_")
         if node_type == "M":
             deg_m = max(0, round(seed.random()*p_m*2))
             if deg_m:
-                pref_attach(g, i, deg, node_lists["M"], regions, seed,
-                            peerless_g, label="peer")
+                pref_attach(g, i, deg_m, node_lists["M"], regions, seed,
+                            peerless_g, label="peer",
+                            any_type=first_round)
+                first_round = False
         elif node_type == "CP":
             deg_m = max(0, round(seed.random()*p_cp_m*2))
             deg_cp = max(0, round(seed.random()*p_cp_cp*2))
@@ -299,5 +312,4 @@ def internet_as_graph(n, nt=6, nm=None, ncp=None, nc=None,
             g.add_edges_from(zip([i]*len(targets), targets), type="peer")
             targets = _random_subset(potential_targets_cp, deg_cp, seed)
             g.add_edges_from(zip([i]*len(targets), targets), type="peer")
-
     return g
